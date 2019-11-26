@@ -17,15 +17,13 @@
 #undef SERIAL_RX_BUFFER_SIZE
 #define SERIAL_RX_BUFFER_SIZE 128
 #include "u8glibConf.h"
+#include <AltSoftSerial.h>
 #include <EEPROM.h>
-#include <SoftwareSerial.h>
 #include <avr/pgmspace.h>
 #include <time.h>
 
 #define PIN_LED 13
 #define PIN_PLAYING 12
-#define SOFT_SERIAL_RX 2
-#define SOFT_SERIAL_TX 3
 #define BAUD 115200      // any standard serial value: 300 - 115200
 #define SOFT_BAUD 115200 // any standard serial value: 300 - 115200
 
@@ -84,7 +82,7 @@ bool askDraw = false;
 bool itAskTime = true;
 unsigned loopTime = 0;
 
-SoftwareSerial mySerial(SOFT_SERIAL_RX, SOFT_SERIAL_TX);
+AltSoftSerial mySerial;
 
 void clearAll();
 void eepromReadStr(int addr, char *str);
@@ -120,47 +118,24 @@ void setup2() {
 }
 
 void setTimer2() {
+  // set timer1 interrupt at 4Hz
   cli();      // stop interrupts
-  TCCR2A = 0; // set entire TCCR2A register to 0
-  TCCR2B = 0; // same for TCCR2B
+  TCCR2A = 0; // set entire TCCR1A register to 0
+  TCCR2B = 0; // same for TCCR1B
   TCNT2 = 0;  // initialize counter value to 0
-  // set compare match register for 1khz increments
-  OCR2A = F_CPU / 1000 / 64 - 1; // (must be <256)
+  // set compare match register for 4hz increments
+  //  OCR1A = 15624;// = (16*10^6) / (1*1024) - 1 (must be <65536)
+  OCR2A = F_CPU / 4096 - 1; // = (16*10^6) / (2*1024) - 1 (must be <65536)
   // turn on CTC mode
-  TCCR2A |= (1 << WGM21);
-  // Set CS21 bit for 64 prescaler
-  TCCR2B |= (1 << CS22);
+  TCCR2B |= (1 << WGM12);
+  // Set CS10 and CS12 bits for 1024 prescaler
+  TCCR2B |= (1 << CS12) | (1 << CS10);
   // enable timer compare interrupt
   TIMSK2 |= (1 << OCIE2A);
   sei(); // allow interrupts
 }
 
-void setTimer1() {
-  // set timer1 interrupt at 4Hz
-  cli();      // stop interrupts
-  TCCR1A = 0; // set entire TCCR1A register to 0
-  TCCR1B = 0; // same for TCCR1B
-  TCNT1 = 0;  // initialize counter value to 0
-  // set compare match register for 4hz increments
-  //  OCR1A = 15624;// = (16*10^6) / (1*1024) - 1 (must be <65536)
-  OCR1A = F_CPU / 4096 - 1; // = (16*10^6) / (2*1024) - 1 (must be <65536)
-  // turn on CTC mode
-  TCCR1B |= (1 << WGM12);
-  // Set CS10 and CS12 bits for 1024 prescaler
-  TCCR1B |= (1 << CS12) | (1 << CS10);
-  // enable timer compare interrupt
-  TIMSK1 |= (1 << OCIE1A);
-  sei(); // allow interrupts
-}
-
 ISR(TIMER2_COMPA_vect) {
-  cli(); // stop interrupts
-  serial();
-  handleMySerial();
-  sei(); // allow interrupts
-}
-
-ISR(TIMER1_COMPA_vect) { // timer1 interrupt 4Hz
   if (loopTime % 4 == 0) // 1hz
   {
     timestamp++; // time update
@@ -237,7 +212,6 @@ ReStart: // Come back here if LCD contract is changed
     goto ReStart;
   }
   setTimer2();
-  setTimer1();
   lline[2] = (char *)msg2;
   draw(0);
 }
@@ -547,6 +521,8 @@ void askTime() {
 
 ////////////////////////////////////////
 void loop(void) {
+  serial();
+  handleMySerial();
   // scrolling control and draw control
   if (loopScroll >= 1) // 500ms
   {
